@@ -29,7 +29,8 @@ type Result struct {
 	Match   string
 }
 
-func check(err error) {
+// Helper. Panic if given error isn't nil.
+func checkError(err error) {
 	if err != nil {
 		panic(err)
 	}
@@ -62,22 +63,16 @@ func isFileMatchDates(searchParams *SearchParams, fileName string) bool {
 
 		result =
 			minFilter <= minDate && minDate <= maxFilter ||
-			minFilter <= maxDate && maxDate <= maxFilter ||
-			minDate <= minFilter && maxFilter <= maxDate
+				minFilter <= maxDate && maxDate <= maxFilter ||
+				minDate <= minFilter && maxFilter <= maxDate
 	}
 	return result
 }
 
 // Return all (matching) ZIP-files fro given directory. Recursively.
-func getFilesList(
-	dir string,
-	params *SearchParams,
-	conn *ftp.ServerConn,
-) ([]string, error) {
+func getFilesList(dir string, params *SearchParams, conn *ftp.ServerConn) []string {
 	entries, err := conn.NameList(dir)
-	if err != nil {
-		return []string{}, err
-	}
+	checkError(err)
 
 	resultFiles := make([]string, 0)
 	for _, entry := range entries {
@@ -91,93 +86,69 @@ func getFilesList(
 				resultFiles = append(resultFiles, absname)
 			}
 		} else {
-			childs, err := getFilesList(absname, params, conn)
-			if err != nil {
-				return []string{}, err
-			}
-
-			for _, child := range childs {
+			for _, child := range getFilesList(absname, params, conn) {
 				resultFiles = append(resultFiles, child)
 			}
 		}
 	}
-	return resultFiles, nil
+	return resultFiles
 }
 
 // Download file from FTP and return local path.
-func download(ftpPath string, conn *ftp.ServerConn, lock *sync.Mutex) (string, error) {
+func download(ftpPath string, conn *ftp.ServerConn, lock *sync.Mutex) string {
 	// TODO: Search in cache
+
+	// All operations with `conn' from separate goroutines should be protected by mutex.
 	lock.Lock()
 	defer lock.Unlock()
 
 	response, err := conn.Retr(ftpPath)
-	if err != nil {
-		return "", err
-	}
+	checkError(err)
 	defer response.Close()
 
 	f, err := ioutil.TempFile("", path.Base(ftpPath))
-	if err != nil {
-		return "", err
-	}
+	checkError(err)
 	defer f.Close()
 
 	_, err = io.Copy(f, response)
-	if err != nil {
-		return "", err
-	}
+	checkError(err)
 
-	return f.Name(), nil
+	return f.Name()
 }
 
 // Save buffer content to XML file and return file path
-func saveXmlResult(buf *bytes.Buffer, name string) (string, error) {
+func saveXmlResult(buf *bytes.Buffer, name string) string {
 	f, err := ioutil.TempFile("", path.Base(name))
-	if err != nil {
-		return "", err
-	}
+	checkError(err)
 	defer f.Close()
-	io.Copy(f, buf)
-	return f.Name(), nil
+	_, err = io.Copy(f, buf)
+	checkError(err)
+	return f.Name()
 }
 
-func processXml(
-	ftpFile string,
-	entry *zip.File,
-	results chan Result,
-	searchParams *SearchParams,
-) error {
+func processXml(ftpFile string, entry *zip.File, results chan Result, searchParams *SearchParams) {
 	xmlFile, err := entry.Open()
-	if err != nil {
-		return err
-	}
+	checkError(err)
 	defer xmlFile.Close()
 
 	buf := bytes.NewBuffer(nil)
-	if _, err := io.Copy(buf, xmlFile); err != nil {
-		return err
-	}
+	_, err = io.Copy(buf, xmlFile)
+	checkError(err)
 
 	xmlContent := string(buf.Bytes())
 	uXmlContent := strings.ToUpper(xmlContent)
 	for _, pattern := range searchParams.Patterns {
 		uPattern := strings.ToUpper(pattern)
 		if strings.Contains(uXmlContent, uPattern) {
-			xmlFile, err := saveXmlResult(buf, entry.Name)
-			if err != nil {
-				return err
-			}
-
 			results <- Result{
 				ZipPath: ftpFile,
 				XmlName: entry.Name,
-				XmlFile: xmlFile,
+				XmlFile: saveXmlResult(buf, entry.Name),
 				Match:   pattern,
 			}
 			break
 		}
 	}
-	return nil
 }
 
 func processZip(
@@ -186,17 +157,12 @@ func processZip(
 	conn *ftp.ServerConn,
 	searchParams *SearchParams,
 	connMutex *sync.Mutex,
-) error {
-	localFile, err := download(ftpFile, conn, connMutex)
-	if err != nil {
-		return err
-	}
+) {
+	localFile := download(ftpFile, conn, connMutex)
 	defer os.Remove(localFile)
 
 	zipFile, err := zip.OpenReader(localFile)
-	if err != nil {
-		return err
-	}
+	checkError(err)
 	defer zipFile.Close()
 
 	var wg sync.WaitGroup
@@ -208,32 +174,25 @@ func processZip(
 		}()
 	}
 	wg.Wait()
-	return nil
 }
 
 // Search over FTP->ZIP->XML files by given params and put results to
 // returned channel.
-func Search(searchParams *SearchParams) (chan Result, error) {
+func Search(searchParams *SearchParams) chan Result {
 	conn, err := ftp.Connect("ftp.zakupki.gov.ru:21")
-	if err != nil {
-		return nil, err
-	}
-	if err := conn.Login("free", "free"); err != nil {
-		return nil, err
-	}
+	checkError(err)
+	err = conn.Login("free", "free")
+	checkError(err)
 
 	var wg sync.WaitGroup
 	results := make(chan Result)
 	connLock := &sync.Mutex{}
 
-	filesList, err := getFilesList(searchParams.Directory, searchParams, conn)
-	if err != nil {
-		return nil, err
-	}
-	for _, ftpFile := range filesList {
+	dir := searchParams.Directory
+	for _, ftpFile := range getFilesList(dir, searchParams, conn) {
 		wg.Add(1)
 		go func() {
-			err = processZip(ftpFile, results, conn, searchParams, connLock)
+			processZip(ftpFile, results, conn, searchParams, connLock)
 			wg.Done()
 		}()
 	}
@@ -243,6 +202,5 @@ func Search(searchParams *SearchParams) (chan Result, error) {
 		close(results)
 		conn.Quit()
 	}()
-
-	return results, nil
+	return results
 }

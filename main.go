@@ -47,10 +47,7 @@ func main() {
 		Patterns:  strings.Split(*patternsArg, ","),
 	}
 
-	results, err := Search(&searchParams)
-	check(err)
-
-	for result := range results {
+	for result := range Search(&searchParams) {
 		fmt.Printf("Found %s in %s\n", result.Match, result.XmlName)
 	}
 }
