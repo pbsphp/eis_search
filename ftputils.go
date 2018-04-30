@@ -171,10 +171,10 @@ func processZip(
 	var wg sync.WaitGroup
 	for _, entry := range zipFile.File {
 		wg.Add(1)
-		go func() {
+		go func(entry *zip.File) {
 			processXml(ftpFile, entry, results, searchParams)
 			wg.Done()
-		}()
+		}(entry)
 	}
 	wg.Wait()
 }
@@ -194,10 +194,10 @@ func Search(searchParams *SearchParams) chan Result {
 	dir := searchParams.Directory
 	for _, ftpFile := range getFilesList(dir, searchParams, conn) {
 		wg.Add(1)
-		go func() {
+		go func(ftpFile string) {
 			processZip(ftpFile, results, conn, searchParams, connLock)
 			wg.Done()
-		}()
+		}(ftpFile)
 	}
 
 	go func() {
