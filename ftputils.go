@@ -138,18 +138,13 @@ func processXml(ftpFile string, entry *zip.File, results chan Result, searchPara
 	_, err = io.Copy(buf, xmlFile)
 	checkError(err)
 
-	xmlContent := string(buf.Bytes())
-	uXmlContent := strings.ToUpper(xmlContent)
-	for _, pattern := range searchParams.Patterns {
-		uPattern := strings.ToUpper(pattern)
-		if strings.Contains(uXmlContent, uPattern) {
-			results <- Result{
-				ZipPath: ftpFile,
-				XmlName: entry.Name,
-				XmlFile: saveXmlResult(buf, entry.Name),
-				Match:   pattern,
-			}
-			break
+	foundPattern := searchPatterns(buf.Bytes(), searchParams.Patterns)
+	if foundPattern != "" {
+		results <- Result{
+			ZipPath: ftpFile,
+			XmlName: entry.Name,
+			XmlFile: saveXmlResult(buf, entry.Name),
+			Match:   foundPattern,
 		}
 	}
 }
@@ -208,4 +203,35 @@ func Search(searchParams *SearchParams) chan Result {
 		conn.Quit()
 	}()
 	return results
+}
+
+// Search given patterns in buffer.
+// Do case insensitive search if it required.
+// Return first found pattern or empty string.
+func searchPatterns(buf []byte, patterns []string) string {
+	var result string
+	// Lazy initialization
+	var uBuf []byte // uppercase buffer
+	for _, pattern := range patterns {
+		uPattern, lPattern := strings.ToUpper(pattern), strings.ToLower(pattern)
+		if uPattern == lPattern {
+			// Patterns are case insensitive.
+			found := bytes.Contains(buf, []byte(pattern))
+			if found {
+				result = pattern
+				break
+			}
+		} else {
+			// Patterns are case sensitive. Make it lowercase before compare.
+			if uBuf == nil {
+				uBuf = bytes.ToLower(buf)
+			}
+			found := bytes.Contains(uBuf, []byte(lPattern))
+			if found {
+				result = pattern
+				break
+			}
+		}
+	}
+	return result
 }
