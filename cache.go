@@ -79,15 +79,12 @@ func (cache *Cache) Get(ftpPath string) string {
 	row, ok := cache.Data.Rows[ftpPath]
 	if ok {
 		row.Used = time.Now().Unix()
-		// TODO: Execute cache.flush() and file copy concurrently
 		cache.flush()
 		tempFile, err := ioutil.TempFile("", row.LocalName)
 		checkError(err)
 		defer tempFile.Close()
-		cacheFile, err := os.Open(path.Join(cache.directory, row.LocalName))
-		checkError(err)
-		defer cacheFile.Close()
-		_, err = io.Copy(tempFile, cacheFile)
+		cachedPath := path.Join(cache.directory, row.LocalName)
+		err = copyFile(tempFile.Name(), cachedPath)
 		checkError(err)
 		result = tempFile.Name()
 	}
@@ -120,22 +117,14 @@ func (cache *Cache) Store(ftpPath string, locPath string) {
 		delete(cache.Data.Rows, minKey)
 	}
 
-	// TODO: Copy files and cache.flush() concurrently
-	source, err := os.Open(locPath)
-	checkError(err)
-	defer source.Close()
 	storeFileName := fmt.Sprintf(
 		"%d_%s",
 		time.Now().UnixNano(),
 		path.Base(locPath),
 	)
 	storeFilePath := path.Join(cache.directory, storeFileName)
-	destination, err := os.OpenFile(
-		storeFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	checkError(err)
-	defer destination.Close()
-	_, err = io.Copy(destination, source)
-	checkError(err)
+	copyFile(storeFilePath, locPath)
+
 	cache.Data.Rows[ftpPath] = CacheRow{
 		LocalName: storeFileName,
 		Used:      time.Now().Unix(),
@@ -150,4 +139,27 @@ func (cache *Cache) flush() {
 	dbFile := path.Join(cache.directory, indexName)
 	err = ioutil.WriteFile(dbFile, data, 0644)
 	checkError(err)
+}
+
+// Copy file.
+// Current cache model doesn't allow in-place read of cached files
+// because goroutines can try to read from files deleted by LRU.
+// So Get and Store actually copies files. It's reasonably fast.
+// TODO: Simple lightweight transactions or locks model.
+func copyFile(dstPath, srcPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	_, err = io.Copy(dst, src)
+	if err != nil {
+		return err
+	}
+	return nil
 }
