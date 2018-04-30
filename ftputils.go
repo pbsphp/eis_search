@@ -29,12 +29,8 @@ type Result struct {
 	Match   string
 }
 
-// Helper. Panic if given error isn't nil.
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
+// Cache singleton.
+var cache = NewCache("/tmp/CACHE", 100)
 
 // Precompiled regex with zip dates.
 // For isFileMatchDates().
@@ -96,24 +92,31 @@ func getFilesList(dir string, params *SearchParams, conn *ftp.ServerConn) []stri
 
 // Download file from FTP and return local path.
 func download(ftpPath string, conn *ftp.ServerConn, lock *sync.Mutex) string {
-	// TODO: Search in cache
+	var result string
+	cachedFile := cache.Get(ftpPath)
+	if cachedFile != "" {
+		result = cachedFile
+	} else {
+		// All operations with `conn' from separate goroutines should be protected by mutex.
+		lock.Lock()
+		defer lock.Unlock()
 
-	// All operations with `conn' from separate goroutines should be protected by mutex.
-	lock.Lock()
-	defer lock.Unlock()
+		response, err := conn.Retr(ftpPath)
+		checkError(err)
+		defer response.Close()
 
-	response, err := conn.Retr(ftpPath)
-	checkError(err)
-	defer response.Close()
+		f, err := ioutil.TempFile("", path.Base(ftpPath))
+		checkError(err)
+		defer f.Close()
 
-	f, err := ioutil.TempFile("", path.Base(ftpPath))
-	checkError(err)
-	defer f.Close()
+		_, err = io.Copy(f, response)
+		checkError(err)
 
-	_, err = io.Copy(f, response)
-	checkError(err)
+		cache.Store(ftpPath, f.Name())
+		result = f.Name()
+	}
 
-	return f.Name()
+	return result
 }
 
 // Save buffer content to XML file and return file path

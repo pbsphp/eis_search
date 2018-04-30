@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// Helper. Panic if given error isn't nil.
+func checkError(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func main() {
 	placeArg := flag.String("place", "", "Search place (shortcut or full ftp directory path)")
 	fromArg := flag.String("from", "00000000", "Lower date limit (YYYYmmdd format)")
