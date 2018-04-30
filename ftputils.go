@@ -170,11 +170,13 @@ func processZip(
 
 	var wg sync.WaitGroup
 	for _, entry := range zipFile.File {
-		wg.Add(1)
-		go func(entry *zip.File) {
-			processXml(ftpFile, entry, results, searchParams)
-			wg.Done()
-		}(entry)
+		if strings.HasSuffix(entry.Name, ".xml") {
+			wg.Add(1)
+			go func(entry *zip.File) {
+				processXml(ftpFile, entry, results, searchParams)
+				wg.Done()
+			}(entry)
+		}
 	}
 	wg.Wait()
 }
