@@ -1,11 +1,163 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 )
+
+// Dialog message.
+// simple object of message containing text, attached file, etc.
+type Message struct {
+	Text string
+}
+
+func main() {
+	tgToken := os.Getenv("TG_TOKEN")
+	if tgToken == "" {
+		fmt.Println("Please set TG_TOKEN env variable.")
+		panic("Empty TG_TOKEN.")
+	}
+
+	bot, err := tgbotapi.NewBotAPI(tgToken)
+	if err != nil {
+		panic(err)
+	}
+
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates, err := bot.GetUpdatesChan(u)
+
+	// Dictionary containing dialogs with users.
+	// Key - Chat ID,
+	// Value - dialog input channel.
+	dialogsMap := make(map[int64]chan Message)
+
+	for update := range updates {
+		if update.Message == nil {
+			continue
+		}
+
+		chatId := update.Message.Chat.ID
+		// Find existing dialog with this user. Or start it.
+		var inbox, outbox chan Message
+		inbox, ok := dialogsMap[chatId]
+		if !ok {
+			inbox, outbox = dialog()
+			dialogsMap[chatId] = inbox
+			// Postman will react on output dialog messages, send them to user and
+			// destroy dialog when it is done.
+			go postman(bot, outbox, dialogsMap, chatId)
+		}
+
+		inbox <- Message{
+			Text: update.Message.Text,
+		}
+	}
+}
+
+// Start simple dialog.
+// Return input and output channels. Started goroutine listens for input messages from
+// input channel and puts replies into output channel.
+// When dialog is completed, output channel will be closed.
+func dialog() (chan Message, chan Message) {
+	inbox := make(chan Message)
+	outbox := make(chan Message)
+
+	// Listen for messages on input channel and put replies into output channel.
+	// Close output channel on finish.
+	go func() {
+		for message := <-inbox; message.Text != "/start"; message = <-inbox {
+			outbox <- Message{
+				Text: "Используйте /start чтобы начать.",
+			}
+		}
+
+		outbox <- Message{
+			Text: "Что (где) искать?\n" +
+				"Полный путь к директории или одно из: {контракт|извещение|ПГ|ПЗ}.",
+		}
+		message := <-inbox
+		place := placeToDirectory(message.Text)
+
+		for !strings.HasPrefix(place, "/") {
+			outbox <- Message{
+				Text: "Абсолютный путь (начинается на \"/\") или одно из: {контракт|извещение|ПГ|ПЗ}.",
+			}
+			message := <-inbox
+			place = placeToDirectory(message.Text)
+		}
+
+		var filterFrom, filterTo string
+		var ok bool
+		for !ok {
+			outbox <- Message{
+				Text: "С какого по какое? (ДД.ММ.ГГГГ - ДД.ММ.ГГГГ).\n" +
+					"Например для поиска за все время можно оставить \" - \".",
+			}
+			message = <-inbox
+			filterFrom, filterTo, ok = parseDateFilters(message.Text)
+		}
+
+		outbox <- Message{
+			Text: "Что искать? (Через запятую).",
+		}
+		message = <-inbox
+		patterns := splitPatterns(message.Text)
+
+		searchParams := SearchParams{
+			Directory: place,
+			FromDate:  filterFrom,
+			ToDate:    filterTo,
+			Patterns:  patterns,
+		}
+
+		if filterFrom == "" {
+			filterFrom = "*"
+		}
+		if filterTo == "" {
+			filterTo = "*"
+		}
+		outbox <- Message{
+			Text: fmt.Sprintf(
+				"Ищем %s в %s за период с %s по %s",
+				strings.Join(searchParams.Patterns, "|"),
+				searchParams.Directory,
+				filterFrom,
+				filterTo,
+			),
+		}
+
+		for result := range Search(&searchParams) {
+			outbox <- Message{
+				Text: fmt.Sprintf("%s нашлось в %s.", result.Match, result.XmlName),
+			}
+		}
+
+		outbox <- Message{
+			Text: "Все.",
+		}
+
+		close(outbox)
+	}()
+
+	return inbox, outbox
+}
+
+// Attach to dialog() output channel and send replies to telegram user.
+// Destroy mailboxes (input and output returned by dialog()) when dialog is done.
+// One goroutine for one dialog.
+func postman(bot *tgbotapi.BotAPI, mailbox chan Message, dialogsMap map[int64]chan Message, chatId int64) {
+	for message := range mailbox {
+		msg := tgbotapi.NewMessage(chatId, message.Text)
+		bot.Send(msg)
+	}
+
+	delete(dialogsMap, chatId)
+}
 
 // Helper. Panic if given error isn't nil.
 func checkError(err error) {
@@ -14,47 +166,61 @@ func checkError(err error) {
 	}
 }
 
-func main() {
-	placeArg := flag.String("place", "", "Search place (shortcut or full ftp directory path)")
-	fromArg := flag.String("from", "00000000", "Lower date limit (YYYYmmdd format)")
-	toArg := flag.String("to", "99999999", "Upper date limit (YYYYmmdd format)")
-	patternsArg := flag.String("patterns", "", "Search patterns (split with comma)")
-
-	flag.Parse()
-
-	if *placeArg == "" {
-		fmt.Fprintln(os.Stderr, "Usage:")
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-	if *patternsArg == "" {
-		fmt.Fprintln(os.Stderr, "Usage:")
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
+// Converts given place shortnames to directories.
+func placeToDirectory(place string) string {
 	var directory string
-	switch *placeArg {
-	case "contract":
+	switch place {
+	case "контракт":
 		directory = "/fcs_regions/Tatarstan_Resp/contracts/"
-	case "notification":
+	case "извещение", "notifications", "izv", "izvs":
 		directory = "/fcs_regions/Tatarstan_Resp/notifications/"
-	case "schedule":
+	case "ПГ", "schedules", "plan_schedule", "plan_schedules":
 		directory = "/fcs_regions/Tatarstan_Resp/plan_schedules/"
-	case "purchase":
+	case "ПЗ", "purchases", "plan_purchase", "plan_purchases":
 		directory = "/fcs_regions/Tatarstan_Resp/plan_purchases/"
 	default:
-		directory = *placeArg
+		directory = place
 	}
+	return directory
+}
 
-	searchParams := SearchParams{
-		Directory: directory,
-		FromDate:  *fromArg,
-		ToDate:    *toArg,
-		Patterns:  strings.Split(*patternsArg, ","),
+// Parse dates from string given by user.
+// String should be like this: "fromDate - toDate", where fromDate and toDate are
+// optional dates (dd.mm.YYYY).
+func parseDateFilters(userInput string) (string, string, bool) {
+	matches := regexp.MustCompile("[ ]*-[ ]*").Split(userInput, 2)
+	if matches == nil || len(matches) != 2 {
+		return "", "", false
 	}
+	fromDateSrc := strings.TrimSpace(matches[0])
+	toDateSrc := strings.TrimSpace(matches[1])
+	var fromDate, toDate string
+	if fromDateSrc != "" {
+		t, err := time.Parse("02.01.2006", fromDateSrc)
+		if err != nil { // Always check errors even if they should not happen.
+			return "", "", false
+		}
+		fromDate = t.Format("20060102")
+	}
+	if toDateSrc != "" {
+		t, err := time.Parse("02.01.2006", toDateSrc)
+		if err != nil { // Always check errors even if they should not happen.
+			return "", "", false
+		}
+		toDate = t.Format("20060102")
+	}
+	return fromDate, toDate, true
+}
 
-	for result := range Search(&searchParams) {
-		fmt.Printf("Found %s in %s\n", result.Match, result.XmlName)
+// Split comma separated string given by user to words.
+func splitPatterns(userInput string) []string {
+	split := strings.Split(userInput, ",")
+	patterns := make([]string, 0, len(split))
+	for _, pattern := range split {
+		p := strings.TrimSpace(pattern)
+		if p != "" {
+			patterns = append(patterns, p)
+		}
 	}
+	return patterns
 }
