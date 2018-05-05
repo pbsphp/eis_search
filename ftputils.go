@@ -25,7 +25,7 @@ type SearchParams struct {
 type Result struct {
 	ZipPath string
 	XmlName string
-	XmlFile string
+	XmlFile *bytes.Buffer
 	Match   string
 }
 
@@ -119,17 +119,7 @@ func download(ftpPath string, conn *ftp.ServerConn, lock *sync.Mutex) string {
 	return result
 }
 
-// Save buffer content to XML file and return file path
-func saveXmlResult(buf *bytes.Buffer, name string) string {
-	f, err := ioutil.TempFile("", path.Base(name))
-	checkError(err)
-	defer f.Close()
-	_, err = io.Copy(f, buf)
-	checkError(err)
-	return f.Name()
-}
-
-func processXml(ftpFile string, entry *zip.File, results chan Result, searchParams *SearchParams) {
+func processXml(ftpFile string, entry *zip.File, results chan *Result, searchParams *SearchParams) {
 	xmlFile, err := entry.Open()
 	checkError(err)
 	defer xmlFile.Close()
@@ -140,10 +130,10 @@ func processXml(ftpFile string, entry *zip.File, results chan Result, searchPara
 
 	foundPattern := searchPatterns(buf.Bytes(), searchParams.Patterns)
 	if foundPattern != "" {
-		results <- Result{
+		results <- &Result{
 			ZipPath: ftpFile,
 			XmlName: entry.Name,
-			XmlFile: saveXmlResult(buf, entry.Name),
+			XmlFile: buf,
 			Match:   foundPattern,
 		}
 	}
@@ -151,7 +141,7 @@ func processXml(ftpFile string, entry *zip.File, results chan Result, searchPara
 
 func processZip(
 	ftpFile string,
-	results chan Result,
+	results chan *Result,
 	conn *ftp.ServerConn,
 	searchParams *SearchParams,
 	connMutex *sync.Mutex,
@@ -178,14 +168,14 @@ func processZip(
 
 // Search over FTP->ZIP->XML files by given params and put results to
 // returned channel.
-func Search(searchParams *SearchParams) chan Result {
+func Search(searchParams *SearchParams) chan *Result {
 	conn, err := ftp.Connect("ftp.zakupki.gov.ru:21")
 	checkError(err)
 	err = conn.Login("free", "free")
 	checkError(err)
 
 	var wg sync.WaitGroup
-	results := make(chan Result)
+	results := make(chan *Result)
 	connLock := &sync.Mutex{}
 
 	dir := searchParams.Directory

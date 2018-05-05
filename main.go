@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"os"
@@ -12,7 +13,9 @@ import (
 // Dialog message.
 // simple object of message containing text, attached file, etc.
 type Message struct {
-	Text string
+	Text     string
+	File     *bytes.Buffer
+	FileName string
 }
 
 func main() {
@@ -133,7 +136,14 @@ func dialog() (chan Message, chan Message) {
 
 		for result := range Search(&searchParams) {
 			outbox <- Message{
-				Text: fmt.Sprintf("%s нашлось в %s.", result.Match, result.XmlName),
+				Text: fmt.Sprintf(
+					"%s нашлось в %s.\nftp://free:free@ftp.zakupki.gov.ru%s",
+					result.Match,
+					result.XmlName,
+					result.ZipPath,
+				),
+				File:     result.XmlFile,
+				FileName: result.XmlName,
 			}
 		}
 
@@ -152,8 +162,17 @@ func dialog() (chan Message, chan Message) {
 // One goroutine for one dialog.
 func postman(bot *tgbotapi.BotAPI, mailbox chan Message, dialogsMap map[int64]chan Message, chatId int64) {
 	for message := range mailbox {
-		msg := tgbotapi.NewMessage(chatId, message.Text)
-		bot.Send(msg)
+		if message.Text != "" {
+			msg := tgbotapi.NewMessage(chatId, message.Text)
+			bot.Send(msg)
+		}
+		if message.File != nil {
+			msg := tgbotapi.NewDocumentUpload(chatId, tgbotapi.FileBytes{
+				Name:  message.FileName,
+				Bytes: message.File.Bytes(),
+			})
+			bot.Send(msg)
+		}
 	}
 
 	delete(dialogsMap, chatId)
