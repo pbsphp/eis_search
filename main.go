@@ -134,6 +134,7 @@ func dialog() (chan Message, chan Message) {
 			),
 		}
 
+		maxResults := 50
 		for result := range Search(&searchParams) {
 			outbox <- Message{
 				Text: fmt.Sprintf(
@@ -144,6 +145,10 @@ func dialog() (chan Message, chan Message) {
 				),
 				File:     result.XmlFile,
 				FileName: result.XmlName,
+			}
+			maxResults--
+			if maxResults == 0 {
+				break
 			}
 		}
 
