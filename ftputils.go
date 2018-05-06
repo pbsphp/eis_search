@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -178,8 +179,14 @@ func Search(searchParams *SearchParams) chan *Result {
 	results := make(chan *Result)
 	connLock := &sync.Mutex{}
 
-	dir := searchParams.Directory
-	for _, ftpFile := range getFilesList(dir, searchParams, conn) {
+	filesList := getFilesList(searchParams.Directory, searchParams, conn)
+	// Sort by presence in cache: cached files first.
+	sort.Slice(filesList, func(i, j int) bool {
+		x, y := filesList[i], filesList[j]
+		return cache.Has(x) && !cache.Has(y)
+	})
+
+	for _, ftpFile := range filesList {
 		wg.Add(1)
 		go func(ftpFile string) {
 			processZip(ftpFile, results, conn, searchParams, connLock)

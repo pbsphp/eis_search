@@ -95,8 +95,7 @@ func (cache *Cache) Get(ftpPath string) string {
 // FtpPath - absolute path to FTP file.
 // LocPath - absolute path to local file to store.
 func (cache *Cache) Store(ftpPath string, locPath string) {
-	_, exists := cache.Data.Rows[ftpPath]
-	if exists {
+	if cache.Has(ftpPath) {
 		return
 	}
 
@@ -130,6 +129,11 @@ func (cache *Cache) Store(ftpPath string, locPath string) {
 		Used:      time.Now().Unix(),
 	}
 	cache.flush()
+}
+
+func (cache *Cache) Has(ftpPath string) bool {
+	_, exists := cache.Data.Rows[ftpPath]
+	return exists
 }
 
 // Flush data to disk
