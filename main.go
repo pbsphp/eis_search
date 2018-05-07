@@ -126,7 +126,7 @@ func dialog() (chan Message, chan Message) {
 		}
 		outbox <- Message{
 			Text: fmt.Sprintf(
-				"Ищем %s в %s за период с %s по %s",
+				"Ищем %s в %s за период с %s по %s\nЧтобы отменить, введите /stop.",
 				strings.Join(searchParams.Patterns, "|"),
 				searchParams.Directory,
 				filterFrom,
@@ -134,27 +134,8 @@ func dialog() (chan Message, chan Message) {
 			),
 		}
 
-		maxResults := 50
-		for result := range Search(&searchParams) {
-			outbox <- Message{
-				Text: fmt.Sprintf(
-					"%s нашлось в %s.\nftp://free:free@ftp.zakupki.gov.ru%s",
-					result.Match,
-					result.XmlName,
-					result.ZipPath,
-				),
-				File:     result.XmlFile,
-				FileName: result.XmlName,
-			}
-			maxResults--
-			if maxResults == 0 {
-				break
-			}
-		}
-
-		outbox <- Message{
-			Text: "Все.",
-		}
+		// Search and iterate over results.
+		iterResults(&searchParams, inbox, outbox)
 
 		close(outbox)
 	}()
@@ -247,4 +228,46 @@ func splitPatterns(userInput string) []string {
 		}
 	}
 	return patterns
+}
+
+// Wait for results and send them to outbox.
+// Also wait for user interrupt on inbox.
+func iterResults(searchParams *SearchParams, inbox chan Message, outbox chan Message) {
+	maxResults := 50
+	resultsChan := Search(searchParams)
+
+	for {
+		select {
+		case result, ok := <-resultsChan:
+			if !ok {
+				// Work is done. Results channel closed.
+				outbox <- Message{
+					Text: "Все.",
+				}
+				return
+			} else {
+				outbox <- Message{
+					Text: fmt.Sprintf(
+						"%s нашлось в %s.\nftp://free:free@ftp.zakupki.gov.ru%s",
+						result.Match,
+						result.XmlName,
+						result.ZipPath,
+					),
+					File:     result.XmlFile,
+					FileName: result.XmlName,
+				}
+				maxResults--
+				if maxResults == 0 {
+					return
+				}
+			}
+		case msg := <-inbox:
+			if msg.Text == "/stop" {
+				outbox <- Message{
+					Text: "Отменено.",
+				}
+				return
+			}
+		}
+	}
 }
