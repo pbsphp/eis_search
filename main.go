@@ -177,11 +177,11 @@ func placeToDirectory(place string) string {
 	switch place {
 	case "контракт":
 		directory = "/fcs_regions/Tatarstan_Resp/contracts/"
-	case "извещение", "notifications", "izv", "izvs":
+	case "извещение":
 		directory = "/fcs_regions/Tatarstan_Resp/notifications/"
-	case "ПГ", "schedules", "plan_schedule", "plan_schedules":
+	case "ПГ":
 		directory = "/fcs_regions/Tatarstan_Resp/plan_schedules/"
-	case "ПЗ", "purchases", "plan_purchase", "plan_purchases":
+	case "ПЗ":
 		directory = "/fcs_regions/Tatarstan_Resp/plan_purchases/"
 	default:
 		directory = place
