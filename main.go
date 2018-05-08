@@ -236,6 +236,15 @@ func iterResults(searchParams *SearchParams, inbox chan Message, outbox chan Mes
 	maxResults := 50
 	resultsChan := Search(searchParams)
 
+	// Read channel until it closed.
+	// There will be goroutine "leakage" if we just exit function without reading
+	// all values from results channel.
+	// TODO: Interrupt goroutines spawned by Search at /stop.
+	readUntilClosed := func(ch chan *Result) {
+		for _ = range ch {
+		}
+	}
+
 	for {
 		select {
 		case result, ok := <-resultsChan:
@@ -258,6 +267,7 @@ func iterResults(searchParams *SearchParams, inbox chan Message, outbox chan Mes
 				}
 				maxResults--
 				if maxResults == 0 {
+					go readUntilClosed(resultsChan)
 					return
 				}
 			}
@@ -266,6 +276,7 @@ func iterResults(searchParams *SearchParams, inbox chan Message, outbox chan Mes
 				outbox <- Message{
 					Text: "Отменено.",
 				}
+				go readUntilClosed(resultsChan)
 				return
 			}
 		}
