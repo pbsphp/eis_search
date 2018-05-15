@@ -175,14 +175,14 @@ func checkError(err error) {
 func placeToDirectory(place string) string {
 	var directory string
 	switch place {
-	case "контракт":
+	case "контракт", "Контракт":
 		directory = "/fcs_regions/Tatarstan_Resp/contracts/"
-	case "извещение":
+	case "извещение", "Извещение":
 		directory = "/fcs_regions/Tatarstan_Resp/notifications/"
-	case "ПГ":
-		directory = "/fcs_regions/Tatarstan_Resp/plan_schedules/"
-	case "ПЗ":
-		directory = "/fcs_regions/Tatarstan_Resp/plan_purchases/"
+	case "ПГ", "пг":
+		directory = "/fcs_regions/Tatarstan_Resp/plangraphs2017/"
+	case "ПЗ", "пз":
+		directory = "/fcs_regions/Tatarstan_Resp/purchaseplans/"
 	default:
 		directory = place
 	}
