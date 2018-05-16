@@ -120,7 +120,7 @@ func download(ftpPath string, conn *ftp.ServerConn, lock *sync.Mutex) string {
 	return result
 }
 
-func processXml(ftpFile string, entry *zip.File, results chan *Result, searchParams *SearchParams) {
+func processXml(ftpFile string, entry *zip.File, results *Channel, searchParams *SearchParams) {
 	xmlFile, err := entry.Open()
 	checkError(err)
 	defer xmlFile.Close()
@@ -131,18 +131,18 @@ func processXml(ftpFile string, entry *zip.File, results chan *Result, searchPar
 
 	foundPattern := searchPatterns(buf.Bytes(), searchParams.Patterns)
 	if foundPattern != "" {
-		results <- &Result{
+		results.Write(&Result{
 			ZipPath: ftpFile,
 			XmlName: entry.Name,
 			XmlFile: buf,
 			Match:   foundPattern,
-		}
+		})
 	}
 }
 
 func processZip(
 	ftpFile string,
-	results chan *Result,
+	results *Channel,
 	conn *ftp.ServerConn,
 	searchParams *SearchParams,
 	connMutex *sync.Mutex,
@@ -159,7 +159,9 @@ func processZip(
 		if strings.HasSuffix(entry.Name, ".xml") {
 			wg.Add(1)
 			go func(entry *zip.File) {
-				processXml(ftpFile, entry, results, searchParams)
+				if !results.Closed {
+					processXml(ftpFile, entry, results, searchParams)
+				}
 				wg.Done()
 			}(entry)
 		}
@@ -169,14 +171,14 @@ func processZip(
 
 // Search over FTP->ZIP->XML files by given params and put results to
 // returned channel.
-func Search(searchParams *SearchParams) chan *Result {
+func Search(searchParams *SearchParams) *Channel {
 	conn, err := ftp.Connect("ftp.zakupki.gov.ru:21")
 	checkError(err)
 	err = conn.Login("free", "free")
 	checkError(err)
 
 	var wg sync.WaitGroup
-	results := make(chan *Result)
+	results := NewChannel()
 	connLock := &sync.Mutex{}
 
 	filesList := getFilesList(searchParams.Directory, searchParams, conn)
@@ -189,14 +191,16 @@ func Search(searchParams *SearchParams) chan *Result {
 	for _, ftpFile := range filesList {
 		wg.Add(1)
 		go func(ftpFile string) {
-			processZip(ftpFile, results, conn, searchParams, connLock)
+			if !results.Closed {
+				processZip(ftpFile, results, conn, searchParams, connLock)
+			}
 			wg.Done()
 		}(ftpFile)
 	}
 
 	go func() {
 		wg.Wait()
-		close(results)
+		close(results.C)
 		conn.Quit()
 	}()
 	return results
