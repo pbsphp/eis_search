@@ -43,9 +43,18 @@ func NewCache(directory string, capacity int) *Cache {
 		panic("NewCache capacity must be >= 0")
 	}
 
+	// Create cache directory if it does not exist.
+	_, err := os.Stat(directory)
+	if os.IsNotExist(err) {
+		err = os.MkdirAll(directory, 0744)
+		checkError(err)
+	} else {
+		checkError(err)
+	}
+
 	var jsonMapping CacheJsonStruct
 	indexFile := path.Join(directory, indexName)
-	_, err := os.Stat(indexFile)
+	_, err = os.Stat(indexFile)
 	if os.IsNotExist(err) {
 		jsonMapping = CacheJsonStruct{
 			Rows: make(map[string]CacheRow),
