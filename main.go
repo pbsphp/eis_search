@@ -1,19 +1,27 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"io/ioutil"
 	"os"
+	"path"
+	"path/filepath"
 )
 
-func main() {
-	tgToken := os.Getenv("TG_TOKEN")
-	if tgToken == "" {
-		fmt.Println("Please set TG_TOKEN env variable.")
-		panic("Empty TG_TOKEN.")
-	}
+type SettingsStruct struct {
+	TelegramToken string
+	CachePath     string
+	CacheSize     int
+	BotMaxResults int
+}
 
-	bot, err := tgbotapi.NewBotAPI(tgToken)
+// Settings holder
+var Settings = readSettings()
+
+func main() {
+	bot, err := tgbotapi.NewBotAPI(Settings.TelegramToken)
 	if err != nil {
 		panic(err)
 	}
@@ -48,4 +56,30 @@ func main() {
 			Text: update.Message.Text,
 		}
 	}
+}
+
+// Helper. Panic if given error isn't nil.
+func checkError(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+// Read and return settings. Panic on error.
+func readSettings() *SettingsStruct {
+	ex, err := os.Executable()
+	checkError(err)
+	currPath := filepath.Dir(ex)
+	confPath := path.Join(currPath, "config.json")
+	_, err = os.Stat(confPath)
+	if os.IsNotExist(err) {
+		fmt.Println("Please create config.json path and place it near executable binary")
+		panic("missing config.json file")
+	}
+	dat, err := ioutil.ReadFile(path.Join(currPath, "config.json"))
+	checkError(err)
+	settings := SettingsStruct{}
+	err = json.Unmarshal(dat, &settings)
+	checkError(err)
+	return &settings
 }

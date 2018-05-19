@@ -31,7 +31,7 @@ type Result struct {
 }
 
 // Cache singleton.
-var cache = NewCache("/tmp/CACHE", 100)
+var cache = NewCache(Settings.CachePath, Settings.CacheSize)
 
 // Precompiled regex with zip dates.
 // For isFileMatchDates().

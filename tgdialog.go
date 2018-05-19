@@ -119,13 +119,6 @@ func postman(bot *tgbotapi.BotAPI, mailbox chan Message, dialogsMap map[int64]ch
 	delete(dialogsMap, chatId)
 }
 
-// Helper. Panic if given error isn't nil.
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
 // Converts given place shortnames to directories.
 func placeToDirectory(place string) string {
 	var directory string
@@ -188,7 +181,7 @@ func splitPatterns(userInput string) []string {
 // Wait for results and send them to outbox.
 // Also wait for user interrupt on inbox.
 func iterResults(searchParams *SearchParams, inbox chan Message, outbox chan Message) {
-	maxResults := 50
+	maxResults := Settings.BotMaxResults
 	resultsChan := Search(searchParams)
 
 	for {
