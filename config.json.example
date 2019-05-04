@@ -1,6 +1,0 @@
-{
-    "TelegramToken": "Place here your telegram token",
-    "CachePath": "/tmp/.eis_search_bot_cache",
-    "CacheSize": 500,
-    "BotMaxResults": 30
-}

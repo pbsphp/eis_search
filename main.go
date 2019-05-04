@@ -1,13 +1,10 @@
 package main
 
 import (
-	"encoding/json"
+	"flag"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
-	"io/ioutil"
 	"os"
-	"path"
-	"path/filepath"
 )
 
 type SettingsStruct struct {
@@ -67,19 +64,48 @@ func checkError(err error) {
 
 // Read and return settings. Panic on error.
 func readSettings() *SettingsStruct {
-	ex, err := os.Executable()
-	checkError(err)
-	currPath := filepath.Dir(ex)
-	confPath := path.Join(currPath, "config.json")
-	_, err = os.Stat(confPath)
-	if os.IsNotExist(err) {
-		fmt.Println("Please create config.json path and place it near executable binary")
-		panic("missing config.json file")
-	}
-	dat, err := ioutil.ReadFile(path.Join(currPath, "config.json"))
-	checkError(err)
 	settings := SettingsStruct{}
-	err = json.Unmarshal(dat, &settings)
-	checkError(err)
+
+	flag.StringVar(
+		&settings.TelegramToken,
+		"token",
+		"",
+		"Telegram bot API token",
+	)
+
+	flag.StringVar(
+		&settings.CachePath,
+		"cachepath",
+		"/tmp/.eis_search_bot_cache",
+		"Cache directory path",
+	)
+
+	flag.IntVar(
+		&settings.CacheSize,
+		"cachesize",
+		500,
+		"Max cached files number",
+	)
+
+	flag.IntVar(
+		&settings.BotMaxResults,
+		"maxresults",
+		30,
+		"Limit of results provided by bot for one search request",
+	)
+
+	flag.Parse()
+
+	if settings.TelegramToken == "" {
+		settings.TelegramToken = os.Getenv("TELEGRAM_TOKEN")
+		if settings.TelegramToken == "" {
+			fmt.Fprintln(
+				os.Stderr,
+				"Telegram bot API token is not provided. Specify -token=TOKEN or TELEGRAM_TOKEN environment variable.",
+			)
+			panic("token is required")
+		}
+	}
+
 	return &settings
 }
