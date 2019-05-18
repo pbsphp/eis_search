@@ -9,8 +9,13 @@ RUN go get -d -v github.com/go-telegram-bot-api/telegram-bot-api && \
     go clean && \
     rm -rf ./*
 
+FROM alpine:3.9 AS certs
+
+RUN apk add -U --no-cache ca-certificates
+
 FROM scratch
 
 COPY --from=builder /eis_search /eis_search
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 ENTRYPOINT ["/eis_search"]
